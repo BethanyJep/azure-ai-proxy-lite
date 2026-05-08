@@ -14,7 +14,7 @@ import {
 import { CopyRegular, EyeOffRegular, EyeRegular } from "@fluentui/react-icons";
 import { useEffect, useReducer } from "react";
 import ReactMarkdown from "react-markdown";
-import { Form, useLoaderData } from "react-router-dom";
+import { Form, useLoaderData, useParams } from "react-router-dom";
 import { reducer } from "./Registration.reducers";
 import type { FoundryToolkitEndpoint, AttendeeRegistration, EventDetails, McpServerEndpoint } from "./Registration.state";
 
@@ -136,6 +136,7 @@ export const Registration = () => {
     event: EventDetails;
     attendee?: AttendeeRegistration;
   };
+  const { id: routeEventId } = useParams<{ id: string }>();
 
   const styles = useStyles();
 
@@ -174,6 +175,85 @@ export const Registration = () => {
   const copyToClipboard = async (value: string) => {
     await navigator.clipboard.writeText(value);
     notify();
+  };
+
+  const toEnvVarName = (name: string) =>
+    name
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+
+  const buildLabConfig = (): string => {
+    // Strip CR/LF from any value written into the .env file to prevent
+    // injection of additional lines via attacker- or typo-controlled fields.
+    const safe = (v: unknown) => String(v ?? "").replace(/[\r\n]+/g, " ");
+
+    const proxyEndpoint =
+      event?.proxyUrl ?? `${window.location.origin}/api/v1`;
+    const eventName = (event?.eventCode ?? "event").trim();
+    const expiresIso = event?.endTimestamp
+      ? new Date(event.endTimestamp).toISOString()
+      : "unknown";
+    const lines: string[] = [];
+    lines.push(`# ${safe(eventName)}`);
+    lines.push(`# Lab config generated ${safe(new Date().toISOString())}`);
+    lines.push(`# API key expires ${safe(expiresIso)}`);
+    lines.push("");
+    lines.push(`EVENT_API_KEY=${safe(attendee?.apiKey)}`);
+    lines.push("");
+
+    // Exclude any models exposed via the Foundry Toolkit.
+    const foundryToolkitNames = new Set(
+      (event?.foundryToolkitEndpoints ?? []).map(
+        (ep: FoundryToolkitEndpoint) => ep.deploymentName
+      )
+    );
+    const modelNames = Object.entries(event?.capabilities ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .flatMap(([, names]) =>
+        [...names]
+          .filter((n) => !foundryToolkitNames.has(n))
+          .sort((a, b) => a.localeCompare(b))
+      );
+
+    if (modelNames.length > 0) {
+      lines.push("# Available models");
+      for (const name of modelNames) {
+        const varBase = toEnvVarName(name);
+        lines.push(`${varBase}=${safe(name)}`);
+        lines.push(`${varBase}_URL=${safe(proxyEndpoint)}`);
+        lines.push("");
+      }
+    }
+
+    if (event?.mcpServerEndpoints && event.mcpServerEndpoints.length > 0) {
+      lines.push("# MCP server endpoints");
+      for (const ep of event.mcpServerEndpoints) {
+        lines.push(`${toEnvVarName(ep.deploymentName)}_MCP_URL=${safe(ep.endpointUrl)}`);
+      }
+      lines.push("");
+    }
+
+    return lines.join("\n");
+  };
+
+  const downloadLabConfig = () => {
+    const content = buildLabConfig();
+    const safeId = (routeEventId ?? event?.id ?? event?.eventCode ?? "event")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    const filename = `lab-${safeId || "event"}.env`;
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const adjustedLocalTime = (
@@ -429,6 +509,18 @@ if __name__ == "__main__":
           The real power of the Azure OpenAI Service is in the SDKs that allow you to integrate AI capabilities into your applications. You'll need your API Key and the proxy Endpoint to access AI resources using an SDK such as the OpenAI SDK or making REST calls.
           <br />
           <br />
+          <Button
+            appearance="primary"
+            onClick={downloadLabConfig}
+            style={{ alignSelf: "flex-start", marginBottom: "12px" }}
+          >
+            Download lab config (.env)
+          </Button>
+          <p className={styles.toolkitDescription}>
+            Saves a <code>lab-{(routeEventId ?? event?.id ?? event?.eventCode ?? "event").toString().toLowerCase().replace(/[^a-z0-9-]+/g, "-")}.env</code> file
+            containing your <code>EVENT_API_KEY</code>, a <code>MODEL_NAME</code> and matching
+            {" "}<code>MODEL_NAME_URL</code> entry for each available model, and any MCP server URLs.
+          </p>
           <div className={styles.detailsSection}>
           <div className={styles.toolkitCard}>
             <span className={styles.toolkitLabel}>Event API Key:</span>
