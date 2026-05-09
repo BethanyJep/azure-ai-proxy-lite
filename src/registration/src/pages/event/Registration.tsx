@@ -260,13 +260,10 @@ export const Registration = () => {
     timestamp: Date,
     utcOffsetInMinutes: number
   ): string => {
-    // returns time zone adjusted date/time
+    // The backend stores the admin-entered wallclock as DateTimeKind.Utc
+    // without converting. Subtract the event's UTC offset to recover the
+    // true UTC instant, then let Intl format it in the viewer's local TZ.
     const date = new Date(timestamp);
-    // get the timezone offset component that was added as no tz supplied in date time
-    const tz = date.getTimezoneOffset();
-    // remove the browser based timezone offset
-    date.setMinutes(date.getMinutes() - tz);
-    // add the event timezone offset
     date.setMinutes(date.getMinutes() - utcOffsetInMinutes);
 
     // Get the browser locale
@@ -304,6 +301,21 @@ export const Registration = () => {
   })();
   const hasNonFoundryModels = nonFoundryModelNames.length > 0;
 
+  const eventStatus: "not-started" | "active" | "ended" | "unknown" = (() => {
+    if (!event?.startTimestamp || !event?.endTimestamp) return "unknown";
+    const offsetMs = (event.timeZoneOffset ?? 0) * 60 * 1000;
+    // Stored timestamps are the event-local wallclock encoded as UTC, so
+    // subtract the event's UTC offset to get the true UTC instant.
+    const startMs = new Date(event.startTimestamp).getTime() - offsetMs;
+    const endMs = new Date(event.endTimestamp).getTime() - offsetMs;
+    if (Number.isNaN(startMs) || Number.isNaN(endMs)) return "unknown";
+    const now = Date.now();
+    if (now < startMs) return "not-started";
+    if (now > endMs) return "ended";
+    return "active";
+  })();
+  const isEventActive = eventStatus === "active" || eventStatus === "unknown";
+
   return (
     <section className={styles.container} >
       <h1>{trimmedEventCode}</h1>
@@ -337,7 +349,14 @@ export const Registration = () => {
           </table>
         </div>
       )}
-      {!(state.profileLoaded && state.profile) && (
+      {!isEventActive && (
+        <h3>
+          {eventStatus === "ended"
+            ? "This event has ended."
+            : "This event has not started yet."}
+        </h3>
+      )}
+      {isEventActive && !(state.profileLoaded && state.profile) && (
         <>
           <h3>Generate your API Key</h3>
           Follow these steps to register and generate your API Key for this event:
@@ -354,7 +373,7 @@ export const Registration = () => {
       <div style={{ textAlign: "left", padding: "0px" }}>
         <ReactMarkdown>{event?.eventMarkdown}</ReactMarkdown>
       </div>
-      {!attendee && (
+      {isEventActive && !attendee && (
         <>
           <h2>Terms of use</h2>
           <div>
@@ -362,7 +381,7 @@ export const Registration = () => {
           </div>
         </>
       )}
-      {state.profileLoaded && state.profile && !attendee && (
+      {isEventActive && state.profileLoaded && state.profile && !attendee && (
         <div>
           <Form method="post">
             <Button type="submit" style={{ fontSize: "medium", marginBottom: "40px" }} appearance="primary">
@@ -371,7 +390,7 @@ export const Registration = () => {
           </Form>
         </div>
       )}
-      {state.profileLoaded && state.profile && attendee && (
+      {isEventActive && state.profileLoaded && state.profile && attendee && (
         <>
           {((event?.foundryToolkitEndpoints && event.foundryToolkitEndpoints.length > 0) ||
             (event?.mcpServerEndpoints && event.mcpServerEndpoints.length > 0) ||
