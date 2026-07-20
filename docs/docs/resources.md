@@ -59,7 +59,7 @@ The proxy supports resources of type **Foundry Toolkit**, which are surfaced to 
 Foundry Toolkit resources are listed as available model endpoints in the attendee registration page so that users can configure the Foundry Toolkit extension to connect through the proxy.
 
 When configuring Foundry Toolkit models, you need to configure your endpoint and api key as follows:
-  - Azure OpenAI endpoint: `https://<endpoint>.services.ai/azure.com/openai/v1?<api-version>
+  - Azure OpenAI endpoint: `https://<endpoint>.services.ai/azure.com/openai/v1?api-version=<api-version>`
   - API Key: copy the API Key on your Microsoft Foundry project page
 
 #### Enabling Foundry Toolkit GPT-5.x compatibility
